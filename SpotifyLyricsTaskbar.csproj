@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Sonar</AssemblyName>
+    <RootNamespace>SpotifyLyricsTaskbar</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Sonar.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>Sonar</Product>
+    <!-- Keep build/runtime small; trimming is applied at publish via command line. -->
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- WFAC010 is a WinForms DPI lint; our PerMonitorV2 manifest is correct for the WPF overlay. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    UseWindowsForms (for the tray icon) injects global usings for
+    System.Windows.Forms and System.Drawing. Those collide with WPF types
+    (Color, Point, Application, FontFamily, Brushes...). Remove the globals;
+    the tray file imports both namespaces explicitly instead.
+  -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <!-- Embedded fonts + logo so the look is consistent everywhere. -->
+  <ItemGroup>
+    <Resource Include="Fonts\*.ttf" />
+    <Resource Include="Sonar.ico" />
+    <Resource Include="Assets\sonarlogo.png" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+dist/
+publish/
+publish-fd/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS / misc
+Thumbs.db
+desktop.ini
+*.log
