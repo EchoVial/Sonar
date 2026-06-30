@@ -35,20 +35,26 @@ public static class TaskbarTracker
         if (r.Height >= r.Width) return null; // vertical (left/right) taskbar — unsupported
 
         double scale = ScaleOf(h, out uint dpi);
+        int edgePad = (int)Math.Round(10 * scale);
 
-        int left = r.Left + (int)Math.Round(config.LeftPadding * scale);
-        int pad = (int)Math.Round(8 * scale);
+        int left, available;
+        if (TaskbarLayout.GetEmptyRegion(h, in r) is { } region)
+        {
+            // Sit in the blank stretch wherever it is (left of centred icons, or the middle when
+            // icons are left‑aligned). Keep the configured left margin when the gap starts at the
+            // taskbar edge; otherwise use a small even margin.
+            int padL = region.left <= r.Left + 4 ? (int)Math.Round(config.LeftPadding * scale) : edgePad;
+            left = region.left + padL;
+            available = Math.Max(0, region.right - left - edgePad);
+        }
+        else
+        {
+            // Fallback: a fraction of the taskbar width from the left edge.
+            left = r.Left + (int)Math.Round(config.LeftPadding * scale);
+            available = Math.Max(0, (int)Math.Round(r.Width * config.AutoWidthFraction) - (left - r.Left));
+        }
 
-        // Prefer the real empty region: everything left of the centred app cluster (Start button).
-        // Fall back to a fraction of the taskbar width when the cluster can't be detected.
-        int rightBound = TaskbarLayout.GetClusterLeft(h, in r) is { } clusterLeft
-            ? clusterLeft - pad
-            : r.Left + (int)Math.Round(r.Width * config.AutoWidthFraction);
-        int available = Math.Max(0, rightBound - left);
-
-        int width = config.MaxWidth > 0
-            ? Math.Min((int)Math.Round(config.MaxWidth * scale), available)
-            : available;
+        int width = config.MaxWidth > 0 ? Math.Min((int)Math.Round(config.MaxWidth * scale), available) : available;
         if (width < 40) width = Math.Min(Math.Max(available, 40), 240);
 
         return new OverlayPlacement(left, r.Top, width, r.Height, dpi);

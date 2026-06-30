@@ -31,10 +31,10 @@ public partial class OverlayWindow : Window
     private readonly SolidColorBrush _textBrush = new(Colors.White);
     private Color? _albumColor;
 
-    private readonly WrapPanel _hostA;
-    private readonly WrapPanel _hostB;
+    private readonly StackPanel _hostA;
+    private readonly StackPanel _hostB;
     private readonly Grid _lyricLayer; // carries the overall text opacity; intro card sits outside it
-    private WrapPanel _frontHost;
+    private StackPanel _frontHost;
     private List<TextBlock> _frontWords = new();
     private readonly DropShadowEffect _glowA;
     private readonly DropShadowEffect _glowB;
@@ -122,12 +122,12 @@ public partial class OverlayWindow : Window
         Direction = 0,
     };
 
-    // WrapPanel (stretched to the window width) lets a long line spill onto a second row
-    // within the empty taskbar region instead of running under the centred icons.
-    private static WrapPanel MakeHost(Effect glow) => new()
+    // Single horizontal line, left-anchored. Long lines are scaled down to fit (FitOneLine)
+    // rather than wrapping — always one line at a time.
+    private static StackPanel MakeHost(Effect glow) => new()
     {
         Orientation = Orientation.Horizontal,
-        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalAlignment = HorizontalAlignment.Left,
         VerticalAlignment = VerticalAlignment.Center,
         Effect = glow,
     };
@@ -178,6 +178,22 @@ public partial class OverlayWindow : Window
     }
 
     private void ApplyTextOpacity() => _lyricLayer.Opacity = Math.Clamp(_config.TextOpacity, 0.05, 1.0);
+
+    /// <summary>Scale a line uniformly so it fits the empty region on one line (down only, never up).</summary>
+    private void FitOneLine(StackPanel host)
+    {
+        host.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double natural = host.DesiredSize.Width;
+        double avail = AvailableWidthDip();
+        double scale = natural > avail && natural > 1 ? Math.Max(0.4, avail / natural) : 1.0;
+        host.LayoutTransform = scale < 0.999 ? new ScaleTransform(scale, scale) : null;
+    }
+
+    private double AvailableWidthDip()
+    {
+        if (_placement is { } p && p.Dpi > 0) return Math.Max(40, p.Width * 96.0 / Math.Max(96u, p.Dpi) - 4);
+        return ActualWidth > 4 ? ActualWidth - 4 : 240;
+    }
 
     private void ApplyGlowMetrics()
     {
@@ -354,6 +370,7 @@ public partial class OverlayWindow : Window
         var outgoing = _frontHost;
 
         incoming.Children.Clear();
+        incoming.LayoutTransform = null;
         var words = new List<TextBlock>(view.Words.Count);
         for (int k = 0; k < view.Words.Count; k++)
         {
@@ -361,6 +378,7 @@ public partial class OverlayWindow : Window
             words.Add(tb);
             incoming.Children.Add(tb);
         }
+        FitOneLine(incoming); // scale the line down if it would exceed the empty region — never wrap
 
         if (snap)
         {

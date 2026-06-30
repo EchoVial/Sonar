@@ -68,10 +68,10 @@ public partial class App : Application
             var hb = TaskbarTracker.GetTaskbarHandle();
             string rectStr = TaskbarTracker.TryGetTaskbarRect(out var rr)
                 ? $"L={rr.Left} R={rr.Right} W={rr.Width} H={rr.Height}" : "none";
-            string cluster = TaskbarLayout.GetClusterLeft(hb, in rr) is { } cl ? cl.ToString() : "null(fallback)";
+            string region = TaskbarLayout.GetEmptyRegion(hb, in rr) is { } reg ? $"{reg.left}..{reg.right} (w={reg.right - reg.left})" : "null(fallback)";
             var pl = TaskbarTracker.GetPlacement(_config);
             string plStr = pl is { } p ? $"Left={p.Left} Top={p.Top} Width={p.Width} Height={p.Height} dpi={p.Dpi}" : "null";
-            Log.Write($"LAYOUT: rect[{rectStr}] clusterLeft={cluster} placement[{plStr}]");
+            Log.Write($"LAYOUT: rect[{rectStr}] emptyRegion[{region}] placement[{plStr}]");
             Shutdown();
             return;
         }
@@ -94,6 +94,7 @@ public partial class App : Application
             var words = e.Args[1].Split(' ', StringSplitOptions.RemoveEmptyEntries);
             int widthDip = int.TryParse(e.Args[2], out var wv) ? wv : 600;
             string outPath = e.Args[3];
+            _overlay.ApplyPlacement(new Taskbar.OverlayPlacement(0, 0, widthDip, 48, 96)); // so FitOneLine targets widthDip
             _overlay.ApplyView(new LyricView(0, words, words.Length, Snap: true));
             Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
             {
@@ -163,7 +164,13 @@ public partial class App : Application
         _tick.Tick += (_, _) => _scheduler.Tick();
 
         _backstop = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _backstop.Tick += (_, _) => _visibility.Reevaluate();
+        _backstop.Tick += (_, _) =>
+        {
+            _visibility.Reevaluate();
+            // Re-place while playing so taskbar alignment / icon changes are picked up live
+            // (the empty-region probe itself is cached, so this is cheap).
+            if (_taskbarVisible && _isPlaying) ApplyPlacement();
+        };
 
         _idleTrim = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _idleTrim.Tick += (_, _) => { _idleTrim.Stop(); MemoryTrim.Trim(); };
