@@ -52,7 +52,7 @@ public partial class SettingsWindow : Window
         _preview.Apply(C, _app.CurrentAlbumColor);
         _preview.Start();
 
-        _playPoll.Tick += (_, _) => UpdatePlayGlyph();
+        _playPoll.Tick += (_, _) => { UpdatePlayGlyph(); UpdateAudioStatus(); };
         _playPoll.Start();
         Closed += (_, _) => { _preview.Stop(); _playPoll.Stop(); };
     }
@@ -366,6 +366,13 @@ public partial class SettingsWindow : Window
 
         PreviewTitle.Text = C.ShowIntro ? "intro · then lyrics" : "lyrics only";
         UpdatePlayGlyph();
+        UpdateAudioStatus();
+    }
+
+    private void UpdateAudioStatus()
+    {
+        string s = _app.AudioSyncStatus;
+        AudioStatus.Text = string.IsNullOrEmpty(s) ? string.Empty : "Audio sync — " + s;
     }
 
     private void UpdatePlayGlyph() => PlayBtn.Content = _app.IsPlaying ? "⏸" : "▶";

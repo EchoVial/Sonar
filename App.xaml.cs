@@ -205,7 +205,7 @@ public partial class App : Application
         _scheduler.ViewChanged += view => _overlay.ApplyView(view);
 
         _audioCapture = new SpotifyAudioCapture();
-        _audioSync = new AudioSync(_config, () => _watcher?.EstimatePositionMs() ?? 0, pos => _scheduler.NearestLineMs(pos, 2500));
+        _audioSync = new AudioSync(_config, () => _watcher?.EstimatePositionMs() ?? 0, pos => _scheduler.NearestLineMs(pos, 3500));
         _audioCapture.FrameReady += (s, sr) => _audioSync.Feed(s, sr);
 
         _tick = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Math.Max(60, _config.TickIntervalMs)) };
@@ -480,6 +480,19 @@ public partial class App : Application
 
     public AppConfig Config => _config;
     public bool IsPlaying => _isPlaying;
+
+    /// <summary>Human-readable audio-sync state for the settings UI.</summary>
+    public string AudioSyncStatus
+    {
+        get
+        {
+            if (!_config.AudioSyncEnabled) return string.Empty;
+            if (_audioCapture is null || !_audioCapture.IsCapturing)
+                return _isPlaying ? "starting…" : "waiting for playback";
+            int c = _config.AudioCorrectionMs;
+            return c == 0 ? "listening to Spotify… (no correction yet)" : $"correcting {(c > 0 ? "+" : "")}{c} ms from audio";
+        }
+    }
     public string? CurrentTrackKey { get; private set; }
     public int EffectiveSongOffset => !string.IsNullOrEmpty(CurrentTrackKey) ? _config.CurrentSongOffset : _config.SyncOffsetMs;
 
