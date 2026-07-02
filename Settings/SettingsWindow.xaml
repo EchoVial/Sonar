@@ -1,7 +1,7 @@
 <Window x:Class="SpotifyLyricsTaskbar.Settings.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Sonar" Width="1000" Height="650"
+        Title="Sonar" Width="1000" Height="672"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ResizeMode="NoResize" WindowStartupLocation="CenterScreen" ShowInTaskbar="True"
         FontFamily="Segoe UI" TextOptions.TextFormattingMode="Ideal">
@@ -110,7 +110,6 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- Header -->
@@ -190,6 +189,10 @@
                         <TextBlock Grid.Column="2" x:Name="OffsetVal" Style="{StaticResource RowVal}"/>
                     </Grid>
                     <TextBlock x:Name="OffsetHint" Text="nudges the current song · + = sooner" Foreground="{StaticResource Muted}" FontSize="10" Margin="66,3,0,0"/>
+
+                    <TextBlock Style="{StaticResource H}" Text="APP" Margin="2,18,0,9"/>
+                    <WrapPanel x:Name="AppTogglesPanel"/>
+                    <TextBlock x:Name="AudioStatus" Foreground="{StaticResource Muted}" FontSize="10" Margin="2,7,0,0"/>
                 </StackPanel>
 
                 <Rectangle Grid.Column="1" Width="1" Fill="{StaticResource Stroke}" Margin="13,2"/>
@@ -223,13 +226,6 @@
                     <StackPanel x:Name="ModesPanel"/>
                 </StackPanel>
             </Grid>
-
-            <!-- APP toggles: full width so nothing clips -->
-            <StackPanel Grid.Row="2" Margin="0,14,0,0">
-                <TextBlock Style="{StaticResource H}" Text="APP"/>
-                <WrapPanel x:Name="AppTogglesPanel"/>
-                <TextBlock x:Name="AudioStatus" Foreground="{StaticResource Muted}" FontSize="10" Margin="2,7,0,0"/>
-            </StackPanel>
         </Grid>
     </Border>
     </Grid>
