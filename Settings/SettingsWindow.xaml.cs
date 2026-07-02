@@ -25,11 +25,14 @@ public partial class SettingsWindow : Window
     private bool _loading;
     private bool _offsetDragging;  // user is dragging the Offset slider → don't auto-move it
     private bool _syncingOffset;   // we're setting the slider from the audio → don't treat as a manual change
+    private bool _overrideUnlocked; // "override" clicked → slider unlocked, audio stays on until it's actually moved
+    private Button? _audioToggle;   // the "Audio sync (beta)" toggle, so we can refresh its state externally
 
     private readonly PreviewPlayer _preview;
     private readonly List<Button> _animBtns = new();
     private readonly List<(Button btn, Action refresh)> _modeRows = new();
     private readonly List<(string hex, Border border, TextBlock check)> _swatches = new();
+    private readonly List<(Button btn, string mode)> _audioModePills = new();
     private readonly DispatcherTimer _playPoll = new() { Interval = TimeSpan.FromMilliseconds(500) };
 
     public SettingsWindow(App app)
@@ -54,7 +57,7 @@ public partial class SettingsWindow : Window
         _preview.Apply(C, _app.CurrentAlbumColor);
         _preview.Start();
 
-        _playPoll.Tick += (_, _) => { UpdatePlayGlyph(); UpdateAudioStatus(); UpdateOffsetDisplay(); };
+        _playPoll.Tick += (_, _) => { UpdatePlayGlyph(); UpdateAudioStatus(); UpdateOffsetState(); };
         _playPoll.Start();
         Closed += (_, _) => { _preview.Stop(); _playPoll.Stop(); };
     }
@@ -249,10 +252,36 @@ public partial class SettingsWindow : Window
     // ---------- app toggles ----------
     private void BuildAppToggles()
     {
+        AppTogglesPanel.Children.Clear();
         AppTogglesPanel.Children.Add(MakeToggle("Hide when paused", () => C.HideWhenPaused, v => C.HideWhenPaused = v));
         AppTogglesPanel.Children.Add(MakeToggle("Spotify only", () => C.SpotifyOnly, v => C.SpotifyOnly = v));
         AppTogglesPanel.Children.Add(MakeToggle("Run at startup", AutoStart.IsEnabled, v => { AutoStart.Set(v); C.RunAtStartup = v; }));
-        AppTogglesPanel.Children.Add(MakeToggle("Audio sync (beta)", () => C.AudioSyncEnabled, v => C.AudioSyncEnabled = v));
+        _audioToggle = MakeToggle("Audio sync (beta)", () => C.AudioSyncEnabled, v => { C.AudioSyncEnabled = v; _overrideUnlocked = false; });
+        AppTogglesPanel.Children.Add(_audioToggle);
+    }
+
+    // ---------- audio sync mode (Balanced / Accuracy Boost) ----------
+    private void BuildAudioModePanel()
+    {
+        AudioModePanel.Children.Clear();
+        _audioModePills.Clear();
+        if (!C.AudioSyncEnabled) return; // modes only matter when audio sync is on
+        AudioModePanel.Children.Add(MakeModePill("Balanced", "Balanced", "Fast — learns one offset per song."));
+        AudioModePanel.Children.Add(MakeModePill("Boost", "Accuracy Boost", "Recommended only for niche artists and tracks · slightly increases resource usage"));
+        RefreshAudioModePills();
+    }
+
+    private Button MakeModePill(string mode, string label, string tip)
+    {
+        var b = new Button { Style = (Style)Resources["MiniPill"], Margin = new Thickness(0, 0, 8, 0), ToolTip = tip, Content = new TextBlock { Text = label, FontSize = 11 } };
+        b.Click += (_, _) => { C.AudioSyncMode = mode; ApplyAll(); };
+        _audioModePills.Add((b, mode));
+        return b;
+    }
+
+    private void RefreshAudioModePills()
+    {
+        foreach (var (btn, mode) in _audioModePills) btn.Tag = Eq(C.AudioSyncMode, mode) ? "on" : null;
     }
 
     private Button MakeToggle(string label, Func<bool> get, Action<bool> set)
@@ -308,13 +337,46 @@ public partial class SettingsWindow : Window
         SizeSlider.ValueChanged += (_, _) => { if (_loading) return; C.FontSize = Math.Round(SizeSlider.Value); SizeVal.Text = ((int)C.FontSize).ToString(); ApplyAll(); };
         GlowSlider.ValueChanged += (_, _) => { if (_loading) return; C.GlowBlurRadius = Math.Round(GlowSlider.Value); GlowVal.Text = ((int)C.GlowBlurRadius).ToString(); ApplyAll(); };
         OpacitySlider.ValueChanged += (_, _) => { if (_loading) return; C.TextOpacity = Math.Round(OpacitySlider.Value) / 100.0; OpacityVal.Text = $"{(int)Math.Round(OpacitySlider.Value)}%"; ApplyAll(); };
-        OffsetSlider.ValueChanged += (_, _) => { if (_loading || _syncingOffset) return; int ms = (int)Math.Round(OffsetSlider.Value); _app.SetSongOffset(ms); OffsetVal.Text = $"{ms} ms"; UpdatePreview(); };
-        OffsetSlider.AddHandler(PreviewMouseLeftButtonDownEvent, new System.Windows.Input.MouseButtonEventHandler((_, _) => _offsetDragging = true), true);
-        OffsetSlider.AddHandler(PreviewMouseLeftButtonUpEvent, new System.Windows.Input.MouseButtonEventHandler((_, _) => _offsetDragging = false), true);
+        OffsetSlider.ValueChanged += (_, _) =>
+        {
+            if (_loading || _syncingOffset) return;
+            if (C.AudioSyncEnabled) { C.AudioSyncEnabled = false; _overrideUnlocked = false; } // moving it turns off auto-sync
+            int ms = (int)Math.Round(OffsetSlider.Value); _app.SetSongOffset(ms); OffsetVal.Text = $"{ms} ms"; ApplyAll();
+        };
+        OffsetSlider.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((_, _) => _offsetDragging = true), true);
+        OffsetSlider.AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler((_, _) => _offsetDragging = false), true);
+
+        // Editable value fields — type a number to set the slider.
+        WireValueBox(SizeVal, SizeSlider);
+        WireValueBox(GlowVal, GlowSlider);
+        WireValueBox(OpacityVal, OpacitySlider);
+        WireValueBox(OffsetVal, OffsetSlider);
+
+        // Per-slider reset dots.
+        var def = new AppConfig();
+        SizeReset.Click += (_, _) => SizeSlider.Value = def.FontSize;
+        GlowReset.Click += (_, _) => GlowSlider.Value = def.GlowBlurRadius;
+        OpacityReset.Click += (_, _) => OpacitySlider.Value = def.TextOpacity * 100;
+        OffsetReset.Click += (_, _) => { _app.ResetCurrentSongOffset(); UpdateOffsetState(); };
+
+        // "override" unlocks the greyed offset slider; audio sync stays on until it's actually moved.
+        OverrideLink.Click += (_, _) => { _overrideUnlocked = true; UpdateOffsetState(); };
 
         PrevBtn.Click += (_, _) => _app.MediaPrevious();
         PlayBtn.Click += (_, _) => { _app.MediaPlayPause(); Dispatcher.BeginInvoke(new Action(UpdatePlayGlyph), DispatcherPriority.Background); };
         NextBtn.Click += (_, _) => _app.MediaNext();
+    }
+
+    private void WireValueBox(TextBox box, Slider slider)
+    {
+        void Commit()
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(box.Text ?? string.Empty, @"-?\d+");
+            if (m.Success && int.TryParse(m.Value, out int v))
+                slider.Value = Math.Clamp(v, slider.Minimum, slider.Maximum);
+        }
+        box.LostKeyboardFocus += (_, _) => Commit();
+        box.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Commit(); Keyboard.ClearFocus(); } };
     }
 
     private void HoverPreview(Action<AppConfig> tweak)
@@ -336,8 +398,6 @@ public partial class SettingsWindow : Window
         OpacityVal.Text = $"{(int)Math.Round(OpacitySlider.Value)}%";
         OffsetSlider.Value = Math.Clamp(_app.EffectiveSongOffset, OffsetSlider.Minimum, OffsetSlider.Maximum);
         OffsetVal.Text = $"{_app.EffectiveSongOffset} ms";
-        OffsetHint.Text = (string.IsNullOrEmpty(_app.CurrentTrackKey) ? "global offset" : "nudges this song")
-            + "  ·  + sooner / − later (if lyrics run ahead)";
         _loading = false;
         UpdateStates();
     }
@@ -371,6 +431,9 @@ public partial class SettingsWindow : Window
         PreviewTitle.Text = C.ShowIntro ? "intro · then lyrics" : "lyrics only";
         UpdatePlayGlyph();
         UpdateAudioStatus();
+        if (_audioToggle != null) _audioToggle.Tag = C.AudioSyncEnabled ? "on" : null;
+        BuildAudioModePanel();
+        UpdateOffsetState();
     }
 
     private void UpdateAudioStatus()
@@ -379,19 +442,33 @@ public partial class SettingsWindow : Window
         AudioStatus.Text = string.IsNullOrEmpty(s) ? string.Empty : "Audio sync — " + s;
     }
 
-    /// <summary>When audio sync is on, show the live auto-tuned offset on the slider (unless the user
-    /// is dragging it to override).</summary>
-    private void UpdateOffsetDisplay()
+    /// <summary>
+    /// Offset row state machine:
+    ///  • audio sync on, locked → slider greyed, shows the live auto-tuned value, "override" link.
+    ///  • "override" clicked → slider unlocked (audio still on); moving it turns audio sync off.
+    ///  • audio sync off → a normal manual offset slider.
+    /// </summary>
+    private void UpdateOffsetState()
     {
-        if (C.AudioSyncEnabled)
+        bool auto = C.AudioSyncEnabled && !_overrideUnlocked;
+        OffsetSlider.IsEnabled = !auto;
+        OffsetVal.IsEnabled = !auto;
+        OverrideLink.Visibility = auto ? Visibility.Visible : Visibility.Collapsed;
+
+        if (auto)
         {
-            OffsetHint.Text = "⟳ auto-tuned from Spotify's audio · drag to override";
+            OffsetHint.Text = "auto-offset from Spotify with audio sync (beta)";
             OffsetHint.Foreground = (Brush)Resources["Mint"];
             if (_offsetDragging) return;
             _syncingOffset = true;
             OffsetSlider.Value = Math.Clamp(_app.LiveSongOffset, OffsetSlider.Minimum, OffsetSlider.Maximum);
             OffsetVal.Text = $"{_app.LiveSongOffset} ms";
             _syncingOffset = false;
+        }
+        else if (C.AudioSyncEnabled)
+        {
+            OffsetHint.Text = "move the slider to override auto-sync";
+            OffsetHint.Foreground = (Brush)Resources["Muted"];
         }
         else
         {

@@ -263,6 +263,7 @@ public partial class App : Application
     private void LearnOffsetTick()
     {
         if (!_config.AudioSyncEnabled || !_isPlaying || string.IsNullOrEmpty(CurrentTrackKey)) return;
+        if (string.Equals(_config.AudioSyncMode, "Boost", StringComparison.OrdinalIgnoreCase)) return; // per-region, not one value
         if (_scheduler.FirstLineMs() == long.MaxValue) return; // no timed lyrics → nothing to learn
 
         int corr = _config.AudioCorrectionMs;
@@ -550,6 +551,19 @@ public partial class App : Application
         }
         else _config.SyncOffsetMs = ms;
         // A manual value is exact — clear the live audio correction; audio sync refines from here.
+        _config.AudioCorrectionMs = 0;
+        _audioSync?.ClearGaps();
+        _lastLearnCorr = 0; _corrStableSince = DateTime.UtcNow;
+        _config.Save();
+        _scheduler?.Tick();
+    }
+
+    /// <summary>The ↺ on the Offset slider: clear this song's offset + live audio correction, relearn fresh.</summary>
+    public void ResetCurrentSongOffset()
+    {
+        if (!string.IsNullOrEmpty(CurrentTrackKey)) _config.SongOffsets.Remove(CurrentTrackKey);
+        _config.CurrentSongOffset = 0;
+        _config.SyncOffsetMs = string.IsNullOrEmpty(CurrentTrackKey) ? 0 : _config.SyncOffsetMs;
         _config.AudioCorrectionMs = 0;
         _audioSync?.ClearGaps();
         _lastLearnCorr = 0; _corrStableSince = DateTime.UtcNow;

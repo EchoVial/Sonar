@@ -30,6 +30,8 @@ public sealed class AudioSync
     private long _lastLogPos = long.MinValue;
     private int _onsetCount, _matchCount;
     private readonly List<int> _gaps = new();
+    private readonly Dictionary<int, List<int>> _segGaps = new(); // per-region gaps (Boost mode)
+    private const int SegMs = 22000;
 
     public AudioSync(AppConfig config, Func<long> getPositionMs, Func<long, long> nearestLineMs)
     {
@@ -40,7 +42,7 @@ public sealed class AudioSync
     }
 
     /// <summary>Drop accumulated gaps (used after the live correction is folded into the song's base offset).</summary>
-    public void ClearGaps() => _gaps.Clear();
+    public void ClearGaps() { _gaps.Clear(); _segGaps.Clear(); }
 
     public void Reset()
     {
@@ -50,6 +52,7 @@ public sealed class AudioSync
         _onsetCount = _matchCount = 0;
         Array.Clear(_prevMag);
         _gaps.Clear();
+        _segGaps.Clear();
         _config.AudioCorrectionMs = 0;
     }
 
@@ -93,9 +96,10 @@ public sealed class AudioSync
             _lastLogPos = pos;
         }
 
+        bool boost = string.Equals(_config.AudioSyncMode, "Boost", StringComparison.OrdinalIgnoreCase);
         _fluxAvg = _fluxAvg <= 0 ? flux : _fluxAvg * 0.92 + flux * 0.08;
-        bool spacedOut = _lastOnsetPos == long.MinValue || pos - _lastOnsetPos > 170; // avoid MinValue overflow
-        bool onset = flux > _fluxAvg * 1.3 && flux > 0.05 && spacedOut;
+        bool spacedOut = _lastOnsetPos == long.MinValue || pos - _lastOnsetPos > (boost ? 140 : 170); // avoid MinValue overflow
+        bool onset = flux > _fluxAvg * (boost ? 1.15 : 1.3) && flux > 0.04 && spacedOut;
         if (!onset) return;
         _lastOnsetPos = pos;
         _onsetCount++;
@@ -108,17 +112,29 @@ public sealed class AudioSync
         int gap = (int)(line - pos - baseOffset); // >0: lyric line sits later than the vocal → show sooner
         if (Math.Abs(gap) >= 5000) return;
 
-        _gaps.Add(gap);
-        if (_gaps.Count > 20) _gaps.RemoveAt(0);
-        if (_gaps.Count < 6) return;
+        // Balanced = one global correction. Boost = a separate correction per ~22 s region, so a
+        // song whose (guessed) plain-lyric timing drifts differently across its length is corrected
+        // piecewise — with more responsive onset detection. Slightly more work, for niche tracks.
+        List<int> gaps;
+        int minSamples, deadband; double ease;
+        if (boost)
+        {
+            int seg = (int)(Math.Max(0, pos) / SegMs);
+            if (!_segGaps.TryGetValue(seg, out gaps!)) { gaps = new List<int>(); _segGaps[seg] = gaps; }
+            minSamples = 4; deadband = 25; ease = 0.20;
+        }
+        else { gaps = _gaps; minSamples = 6; deadband = 40; ease = 0.12; }
 
-        var sorted = new List<int>(_gaps); sorted.Sort();
+        gaps.Add(gap);
+        if (gaps.Count > 22) gaps.RemoveAt(0);
+        if (gaps.Count < minSamples) return;
+
+        var sorted = new List<int>(gaps); sorted.Sort();
         int median = sorted[sorted.Count / 2];
         int cur = _config.AudioCorrectionMs;
         int delta = median - cur;
-        // Deadband + slow ease: ignore sub‑40 ms wobble so the lyrics settle rather than jitter.
-        if (Math.Abs(delta) > 40)
-            _config.AudioCorrectionMs = Math.Clamp(cur + (int)Math.Round(0.12 * delta), -8000, 8000);
+        if (Math.Abs(delta) > deadband) // deadband so the lyrics settle rather than jitter
+            _config.AudioCorrectionMs = Math.Clamp(cur + (int)Math.Round(ease * delta), -10000, 10000);
     }
 
     /// <summary>In-place iterative radix-2 FFT.</summary>

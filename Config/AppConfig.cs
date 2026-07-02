@@ -90,6 +90,9 @@ public sealed class AppConfig
     // ---- Audio sync ----
     /// <summary>Listen to Spotify's audio and auto-correct timing drift (and learn per-song offsets).</summary>
     public bool AudioSyncEnabled { get; set; } = true;
+    /// <summary>"Balanced" (fast, one learned offset per song) or "Boost" (per-region correction,
+    /// deeper analysis — for oddly-timed niche tracks; slightly more CPU).</summary>
+    public string AudioSyncMode { get; set; } = "Balanced";
     /// <summary>Live correction (ms) computed from the audio; added to the playback position. Not serialized.</summary>
     [JsonIgnore] public int AudioCorrectionMs { get; set; }
 
