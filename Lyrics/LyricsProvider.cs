@@ -79,19 +79,19 @@ public sealed class LyricsProvider
 
         // 1) Prefer LRCLIB if it answers (with acceptable synced lyrics) within the preference window.
         var preferred = await FirstSyncedWithin(new List<Task<LyricCandidate?>> { getT, searchT }, _config.LrclibPreferMs, Acceptable);
-        if (preferred != null) return UseSynced(key, preferred);
+        if (preferred != null) return UseSynced(key, preferred, track.DurationSeconds);
 
         // 2) Otherwise take NetEase if its lyrics are acceptable.
         var ne = await Safe(neT); seen.Add(ne);
-        if (Acceptable(ne)) return UseSynced(key, ne!);
+        if (Acceptable(ne)) return UseSynced(key, ne!, track.DurationSeconds);
         if (!expectCjk && ne != null && LrcParser.HasRealTimestamps(ne.Synced) && IsMostlyCjk(ne.Synced))
             Log.Write($"lyrics: rejected CJK lyric from {ne.Source} for {artist} - {title}");
 
         // 3) Give LRCLIB the rest of its budget.
         var g = await Safe(getT); seen.Add(g);
-        if (Acceptable(g)) return UseSynced(key, g!);
+        if (Acceptable(g)) return UseSynced(key, g!, track.DurationSeconds);
         var s = await Safe(searchT); seen.Add(s);
-        if (Acceptable(s)) return UseSynced(key, s!);
+        if (Acceptable(s)) return UseSynced(key, s!, track.DurationSeconds);
 
         // 4) Plain lyrics, distributed across the track as a rough sync.
         //    Genius first (clean English text, covers many obscure tracks), then any plain we already have.
@@ -144,9 +144,11 @@ public sealed class LyricsProvider
         return total > 0 && cjk >= total * 0.30;
     }
 
-    private LyricSet UseSynced(string key, LyricCandidate c)
+    private LyricSet UseSynced(string key, LyricCandidate c, double durationSec)
     {
-        LyricsCache.Write(key, c.Synced!);
+        // Only persist matches we could verify against the track duration — the cache key is now
+        // duration-free, so a loose (duration-unknown) match must not stick permanently.
+        if (durationSec > 1) LyricsCache.Write(key, c.Synced!);
         Log.Write($"lyrics: synced via {c.Source} for {key}");
         return Remember(key, LyricSet.Synced(LrcParser.Parse(c.Synced!), c.Source));
     }

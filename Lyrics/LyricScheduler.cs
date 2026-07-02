@@ -136,6 +136,23 @@ public sealed class LyricScheduler
         return long.MaxValue;
     }
 
+    /// <summary>Timestamp (ms) of the non-empty line nearest to <paramref name="posMs"/> within
+    /// <paramref name="windowMs"/>, else long.MinValue. Used by audio sync to align onsets to lines.</summary>
+    public long NearestLineMs(long posMs, long windowMs)
+    {
+        if (_set.Kind is not (LyricKind.Synced or LyricKind.PlainBestEffort)) return long.MinValue;
+        var lines = _set.Lines;
+        long best = long.MinValue, bestDist = long.MaxValue;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (i < _words.Length && _words[i].Length == 0) continue;
+            long t = (long)lines[i].Time.TotalMilliseconds;
+            long d = Math.Abs(t - posMs);
+            if (d < bestDist) { bestDist = d; best = t; }
+        }
+        return bestDist <= windowMs ? best : long.MinValue;
+    }
+
     /// <summary>Full text of the line due right now, or "" (never the instrumental tag) — the intro scramble target.</summary>
     public string CurrentLineText()
     {
@@ -179,7 +196,7 @@ public sealed class LyricScheduler
             default:
                 var lines = _set.Lines;
                 if (lines.Count == 0) return LyricView.Empty;
-                long pos = _getPositionMs() + _config.SyncOffsetMs + _config.CurrentSongOffset;
+                long pos = _getPositionMs() + _config.SyncOffsetMs + _config.CurrentSongOffset + _config.AudioCorrectionMs;
                 int i = IndexAt(lines, pos);
 
                 // In a gap (before the first line, or on a blank line)?

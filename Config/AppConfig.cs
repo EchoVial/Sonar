@@ -87,6 +87,12 @@ public sealed class AppConfig
     // ---- Startup ----
     public bool RunAtStartup { get; set; } = true;
 
+    // ---- Audio sync (experimental) ----
+    /// <summary>Listen to Spotify's audio and auto-correct constant timing drift.</summary>
+    public bool AudioSyncEnabled { get; set; } = false;
+    /// <summary>Live correction (ms) computed from the audio; added to the playback position. Not serialized.</summary>
+    [JsonIgnore] public int AudioCorrectionMs { get; set; }
+
     // ---- Lyrics network ----
     /// <summary>Optional contact (email/URL) appended to the HTTP User-Agent, as LRCLIB requests.</summary>
     public string? ContactForUserAgent { get; set; }

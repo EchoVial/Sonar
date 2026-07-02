@@ -21,6 +21,8 @@ public partial class App : Application
     private MediaSessionWatcher _watcher = null!;
     private LyricsProvider _lyrics = null!;
     private LyricScheduler _scheduler = null!;
+    private SpotifyAudioCapture _audioCapture = null!;
+    private AudioSync _audioSync = null!;
     private OverlayWindow _overlay = null!;
     private VisibilityController _visibility = null!;
     private TrayIcon _tray = null!;
@@ -58,6 +60,35 @@ public partial class App : Application
         if (e.Args.Length >= 1 && e.Args[0] == "--test-genius")
         {
             _ = RunGeniusTestAsync(e.Args);
+            return;
+        }
+
+        // Hidden diagnostic: verify Spotify‑only audio capture works (logs levels for ~12s).
+        //   Sonar.exe --test-audio     (play a song in Spotify first)
+        if (e.Args.Length >= 1 && e.Args[0] == "--test-audio")
+        {
+            _config = AppConfig.Load();
+            int pid = FindSpotifyPid();
+            Log.Write($"AUDIO test: spotify pid={pid}");
+            var cap = new SpotifyAudioCapture();
+            double peak = 0; long total = 0;
+            cap.FrameReady += (samples, _) =>
+            {
+                double s = 0; foreach (var v in samples) s += v * v;
+                double rms = samples.Length > 0 ? Math.Sqrt(s / samples.Length) : 0;
+                if (rms > peak) peak = rms;
+                total += samples.Length;
+            };
+            cap.Start(pid);
+            int ticks = 0;
+            var at = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            at.Tick += (_, _) =>
+            {
+                Log.Write($"AUDIO test t={ticks + 1}s capturing={cap.IsCapturing} peakRms={peak:F4} samples={total}");
+                peak = 0;
+                if (++ticks >= 12) { at.Stop(); cap.Stop(); Shutdown(); }
+            };
+            at.Start();
             return;
         }
 
@@ -160,6 +191,10 @@ public partial class App : Application
         _scheduler = new LyricScheduler(() => _watcher?.EstimatePositionMs() ?? 0, _config);
         _scheduler.ViewChanged += view => _overlay.ApplyView(view);
 
+        _audioCapture = new SpotifyAudioCapture();
+        _audioSync = new AudioSync(_config, () => _watcher?.EstimatePositionMs() ?? 0, pos => _scheduler.NearestLineMs(pos, 2500));
+        _audioCapture.FrameReady += (s, sr) => _audioSync.Feed(s, sr);
+
         _tick = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Math.Max(60, _config.TickIntervalMs)) };
         _tick.Tick += (_, _) => _scheduler.Tick();
 
@@ -216,6 +251,18 @@ public partial class App : Application
         Shutdown();
     }
 
+    /// <summary>Root Spotify process (the UI/browser process; its tree includes the audio child).</summary>
+    private static int FindSpotifyPid()
+    {
+        try
+        {
+            var procs = System.Diagnostics.Process.GetProcessesByName("Spotify");
+            foreach (var p in procs) if (p.MainWindowHandle != IntPtr.Zero) return p.Id;
+            return procs.Length > 0 ? procs[0].Id : 0;
+        }
+        catch { return 0; }
+    }
+
     private async Task RunGeniusTestAsync(string[] args)
     {
         string artist = args.Length > 1 ? args[1] : string.Empty;
@@ -242,6 +289,7 @@ public partial class App : Application
         _hasTrack = true;
         _scheduler.Clear(); // immediately drop the previous song's line
         _scheduler.SetPending(true); // show ♪ between the intro card and the first line while fetching
+        _audioSync?.Reset(); // new song → clear the learned audio correction
         CurrentTrackKey = track.Key;
         _config.CurrentSongOffset = _config.SongOffsets.TryGetValue(track.Key, out var so) ? so : 0;
         _introArt = BuildBitmap(track.AlbumArt);
@@ -394,6 +442,25 @@ public partial class App : Application
             _idleTrim.Stop();
             _idleTrim.Start(); // trim ~2s after going idle
         }
+        RefreshAudioSync();
+    }
+
+    /// <summary>Start/stop the Spotify audio capture + sync based on the toggle and playback.</summary>
+    private void RefreshAudioSync()
+    {
+        if (_audioCapture is null) return;
+        bool shouldRun = _config.AudioSyncEnabled && _hasTrack && _isPlaying;
+        if (shouldRun && !_audioCapture.IsCapturing)
+        {
+            _audioSync.Reset();
+            _audioCapture.Start(FindSpotifyPid());
+        }
+        else if (!shouldRun && _audioCapture.IsCapturing)
+        {
+            _audioCapture.Stop();
+            _config.AudioCorrectionMs = 0;
+            _scheduler.Tick();
+        }
     }
 
     // ---- Tray actions -------------------------------------------------------
@@ -469,6 +536,7 @@ public partial class App : Application
         {
             _tick?.Stop();
             _backstop?.Stop();
+            _audioCapture?.Stop();
             _visibility?.Dispose();
             _watcher?.Dispose();
             _tray?.Dispose();

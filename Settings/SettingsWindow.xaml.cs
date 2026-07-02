@@ -250,6 +250,7 @@ public partial class SettingsWindow : Window
         AppTogglesPanel.Children.Add(MakeToggle("Hide when paused", () => C.HideWhenPaused, v => C.HideWhenPaused = v));
         AppTogglesPanel.Children.Add(MakeToggle("Spotify only", () => C.SpotifyOnly, v => C.SpotifyOnly = v));
         AppTogglesPanel.Children.Add(MakeToggle("Run at startup", AutoStart.IsEnabled, v => { AutoStart.Set(v); C.RunAtStartup = v; }));
+        AppTogglesPanel.Children.Add(MakeToggle("Audio sync (beta)", () => C.AudioSyncEnabled, v => C.AudioSyncEnabled = v));
     }
 
     private Button MakeToggle(string label, Func<bool> get, Action<bool> set)

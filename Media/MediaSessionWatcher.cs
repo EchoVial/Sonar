@@ -7,7 +7,11 @@ namespace SpotifyLyricsTaskbar.Media;
 public sealed record TrackInfo(string Title, string Artist, string Album, double DurationSeconds)
 {
     public byte[]? AlbumArt { get; init; }
-    public string Key => $"{Artist}|{Title}|{(int)Math.Round(DurationSeconds)}".ToLowerInvariant();
+    /// <summary>Identity for caching + per-song offset. Intentionally duration-free: SMTC can
+    /// report a slightly different duration between plays, which used to fragment the cache
+    /// (a song's good synced lyric stopped being reused) and drop its saved offset. Duration is
+    /// still passed to the providers to match the right lyric version.</summary>
+    public string Key => $"{Artist}|{Title}".Trim().ToLowerInvariant();
     public bool HasMinimum => !string.IsNullOrWhiteSpace(Title);
 }
 

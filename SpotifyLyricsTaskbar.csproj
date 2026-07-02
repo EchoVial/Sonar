@@ -9,6 +9,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>Sonar</AssemblyName>
     <RootNamespace>SpotifyLyricsTaskbar</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
