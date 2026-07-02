@@ -199,7 +199,7 @@ public sealed class LyricsProvider
         var texts = new List<string>();
         foreach (var l in plain.Replace("\r\n", "\n").Split('\n'))
         {
-            var t = l.Trim();
+            var t = LrcParser.CleanText(l.Trim());
             if (t.Length > 0) texts.Add(t);
         }
         var lines = new List<LyricLine>(texts.Count);

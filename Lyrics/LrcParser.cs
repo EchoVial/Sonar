@@ -40,7 +40,7 @@ public static partial class LrcParser
             var lineTags = lineRx.Matches(raw);
             if (lineTags.Count == 0) continue;
 
-            string body = lineRx.Replace(raw, string.Empty);
+            string body = NormalizeChars(lineRx.Replace(raw, string.Empty)); // full-width punctuation → ASCII
 
             // Per-word timing?
             IReadOnlyList<WordTime>? words = null;
@@ -53,7 +53,7 @@ public static partial class LrcParser
             }
             else
             {
-                text = body.Trim();
+                text = UnCensor(body.Trim());
             }
 
             if (text.Length > 0 && credit.IsMatch(text)) continue; // drop credit lines
@@ -101,7 +101,83 @@ public static partial class LrcParser
 
             prevEndedWithSpace = char.IsWhiteSpace(seg[^1]);
         }
-        return (clean.ToString().Trim(), words);
+
+        // Attach a standalone punctuation token ("," ")" "(" …) to a neighbouring word so it
+        // doesn't render as a floating " , " with spaces on both sides.
+        for (int k = words.Count - 1; k >= 0; k--)
+        {
+            string t = words[k].Text.Trim();
+            if (t.Length == 0 || !IsPunctToken(t)) continue;
+            bool opening = t[0] is '(' or '[' or '{';
+            if (opening && k + 1 < words.Count)
+                words[k + 1] = words[k + 1] with { Text = t + words[k + 1].Text };
+            else if (!opening && k > 0)
+                words[k - 1] = words[k - 1] with { Text = words[k - 1].Text.TrimEnd() + t + " " };
+            else continue;
+            words.RemoveAt(k);
+        }
+
+        // Un-censor per word (asterisked profanity → the actual word).
+        for (int k = 0; k < words.Count; k++)
+        {
+            string u = UnCensor(words[k].Text);
+            if (!ReferenceEquals(u, words[k].Text)) words[k] = words[k] with { Text = u };
+        }
+
+        // Rebuild the whole-line text from the cleaned words so it matches what's shown.
+        var lineText = new StringBuilder(clean.Length);
+        foreach (var w in words) lineText.Append(w.Text.TrimEnd()).Append(' ');
+        return (lineText.ToString().Trim(), words);
+    }
+
+    private static readonly char[] CensorMarks = { '*', '#', '@', '$', '%' };
+    private static readonly (Regex rx, string rep)[] CensorFixes =
+    {
+        (new Regex(@"\bf[\*#@\$%\-]+k(ing|in['’]?|er|ed|s)?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "fuck$1"),
+        (new Regex(@"\bf[\*#@\$%\-]{2,}(?=ing\b|in['’])", RegexOptions.IgnoreCase | RegexOptions.Compiled), "fuck"),
+        (new Regex(@"\bsh[\*#@\$%\-]+t\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "shit"),
+        (new Regex(@"\bb[\*#@\$%\-]+tch\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "bitch"),
+        (new Regex(@"\bd[\*#@\$%\-]+ck\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "dick"),
+        (new Regex(@"\bp[\*#@\$%\-]+s+y\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "pussy"),
+        (new Regex(@"\bn[\*#@\$%\-]+gga?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "nigga"),
+        (new Regex(@"\ba[\*#@\$%]{2,}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "ass"),
+    };
+
+    /// <summary>Reconstruct common asterisked profanity ("f**king" → "fucking") for accurate lyrics.</summary>
+    private static string UnCensor(string s)
+    {
+        if (s.IndexOfAny(CensorMarks) < 0) return s;
+        foreach (var (rx, rep) in CensorFixes) s = rx.Replace(s, rep);
+        return s;
+    }
+
+    /// <summary>Public cleaner (full-width normalise + un-censor) for plain-lyric lines.</summary>
+    public static string CleanText(string s) => UnCensor(NormalizeChars(s));
+
+    private static bool IsPunctToken(string t)
+    {
+        foreach (char c in t) if (char.IsLetterOrDigit(c)) return false;
+        return t.Length > 0;
+    }
+
+    private static string NormalizeChars(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        var sb = new StringBuilder(s.Length);
+        foreach (char c in s)
+            sb.Append(c switch
+            {
+                '（' => '(', '）' => ')',
+                '，' or '、' => ',',
+                '。' or '．' => '.',
+                '！' => '!', '？' => '?',
+                '：' => ':', '；' => ';',
+                '‘' or '’' => '\'',
+                '“' or '”' => '"',
+                '　' => ' ',
+                _ => c,
+            });
+        return sb.ToString();
     }
 
     private static long TagMs(Match m)

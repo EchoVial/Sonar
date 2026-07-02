@@ -63,6 +63,19 @@ public partial class App : Application
             return;
         }
 
+        // Hidden diagnostic: parse a (synthetic) LRC string and log the cleaned text + word tokens.
+        if (e.Args.Length >= 2 && e.Args[0] == "--test-parse")
+        {
+            foreach (var l in Lyrics.LrcParser.Parse(e.Args[1]))
+            {
+                var sb = new System.Text.StringBuilder();
+                if (l.Words != null) foreach (var w in l.Words) sb.Append('[').Append(w.Text.TrimEnd()).Append(']');
+                Log.Write($"PARSE text=<{l.Text}> words={sb}");
+            }
+            Shutdown();
+            return;
+        }
+
         // Hidden diagnostic: verify Spotify‑only audio capture works (logs levels for ~12s).
         //   Sonar.exe --test-audio     (play a song in Spotify first)
         if (e.Args.Length >= 1 && e.Args[0] == "--test-audio")

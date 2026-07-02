@@ -217,9 +217,18 @@ public sealed class LyricScheduler
                 double cap = words.Length * Math.Max(120, _config.WordPaceMs) * 1.8;
                 double revealMs = Math.Clamp(window, 200, cap);
 
-                // Outro: well past the last line → instrumental tag.
-                if (i == lines.Count - 1 && _config.ShowInstrumental && pos - startMs > revealMs + 5000)
-                    return Instrumental();
+                // Once the line is fully sung, show ♪ instead of freezing on it — for a real
+                // instrumental stretch before the next line (mid-song) or well into the outro.
+                if (_config.ShowInstrumental && pos - startMs > revealMs)
+                {
+                    if (i + 1 < lines.Count)
+                    {
+                        double gapLen = window - revealMs;                        // instrumental after this line
+                        double toNext = lines[i + 1].Time.TotalMilliseconds - pos;
+                        if (gapLen >= _config.InstrumentalGapMs && toNext > 1500) return Instrumental();
+                    }
+                    else if (pos - startMs > revealMs + 5000) return Instrumental();
+                }
 
                 if (!_config.WordByWord) return new LyricView(i, words, words.Length);
 
