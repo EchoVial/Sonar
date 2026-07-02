@@ -30,6 +30,10 @@ public partial class App : Application
     private DispatcherTimer _tick = null!;     // advances the active line while shown
     private DispatcherTimer _backstop = null!; // re-checks taskbar visibility while playing
     private DispatcherTimer _idleTrim = null!; // one-shot working-set trim when idle
+    private DispatcherTimer _learn = null!;    // folds a settled audio correction into the song's offset
+    private DispatcherTimer _periodicTrim = null!; // keeps the working set trimmed while active
+    private int _lastLearnCorr;
+    private DateTime _corrStableSince = DateTime.UtcNow;
 
     private bool _taskbarVisible = true;
     private bool _isPlaying;
@@ -192,6 +196,7 @@ public partial class App : Application
         _config = AppConfig.Load();
         Log.Write("startup");
 
+        StartMenu.EnsureShortcut(); // show up in the Start menu like an installed app
         // Keep the registry Run entry in sync with the saved preference.
         if (AutoStart.IsEnabled() != _config.RunAtStartup) AutoStart.Set(_config.RunAtStartup);
 
@@ -223,6 +228,15 @@ public partial class App : Application
         _idleTrim = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _idleTrim.Tick += (_, _) => { _idleTrim.Stop(); MemoryTrim.Trim(); };
 
+        _learn = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _learn.Tick += (_, _) => LearnOffsetTick();
+
+        // Audio sync keeps the app "active", so the idle trim rarely fires — trim on a cadence
+        // instead (cheap; evicts cold startup/JIT pages). Keeps the working set ~40–60 MB with
+        // capture running, vs a ~175 MB untrimmed startup peak.
+        _periodicTrim = new DispatcherTimer { Interval = TimeSpan.FromSeconds(12) };
+        _periodicTrim.Tick += (_, _) => MemoryTrim.Trim();
+
         _visibility = new VisibilityController(OnTaskbarVisibilityChanged);
         _visibility.Start();
 
@@ -237,6 +251,33 @@ public partial class App : Application
         _ = _watcher.StartAsync();
         RefreshOverlayState();
         _idleTrim.Start(); // trim startup pages once we've settled
+        _learn.Start();
+        _periodicTrim.Start();
+    }
+
+    /// <summary>
+    /// Once the audio correction settles for a song, fold it into that song's persistent offset:
+    /// next time it starts already-corrected and the live correction shrinks toward zero, so the
+    /// work is "learned" and offloaded. Re-fires if a residual drift builds up again.
+    /// </summary>
+    private void LearnOffsetTick()
+    {
+        if (!_config.AudioSyncEnabled || !_isPlaying || string.IsNullOrEmpty(CurrentTrackKey)) return;
+        if (_scheduler.FirstLineMs() == long.MaxValue) return; // no timed lyrics → nothing to learn
+
+        int corr = _config.AudioCorrectionMs;
+        if (Math.Abs(corr - _lastLearnCorr) > 60) { _lastLearnCorr = corr; _corrStableSince = DateTime.UtcNow; return; }
+        if (Math.Abs(corr) < 40 || (DateTime.UtcNow - _corrStableSince).TotalSeconds < 12) return;
+
+        int learned = Math.Clamp(_config.CurrentSongOffset + corr, -12000, 12000);
+        _config.SongOffsets[CurrentTrackKey!] = learned;
+        _config.CurrentSongOffset = learned;   // apply as the new stable base
+        _config.AudioCorrectionMs = 0;          // live correction folded in → back to ~0
+        _audioSync.ClearGaps();
+        _config.Save();
+        _lastLearnCorr = 0;
+        _corrStableSince = DateTime.UtcNow;
+        Log.Write($"audiosync: learned {learned}ms for {CurrentTrackKey}");
     }
 
     private void ApplyPlacement()
@@ -305,6 +346,7 @@ public partial class App : Application
         _audioSync?.Reset(); // new song → clear the learned audio correction
         CurrentTrackKey = track.Key;
         _config.CurrentSongOffset = _config.SongOffsets.TryGetValue(track.Key, out var so) ? so : 0;
+        _lastLearnCorr = 0; _corrStableSince = DateTime.UtcNow; // reset learning for the new song
         _introArt = BuildBitmap(track.AlbumArt);
         _introLabel = IntroLabel(track);
         CurrentAlbumColor = ColorTools.ExtractAlbumColor(track.AlbumArt);
@@ -562,6 +604,8 @@ public partial class App : Application
         {
             _tick?.Stop();
             _backstop?.Stop();
+            _learn?.Stop();
+            _periodicTrim?.Stop();
             _audioCapture?.Stop();
             _visibility?.Dispose();
             _watcher?.Dispose();

@@ -87,9 +87,9 @@ public sealed class AppConfig
     // ---- Startup ----
     public bool RunAtStartup { get; set; } = true;
 
-    // ---- Audio sync (experimental) ----
-    /// <summary>Listen to Spotify's audio and auto-correct constant timing drift.</summary>
-    public bool AudioSyncEnabled { get; set; } = false;
+    // ---- Audio sync ----
+    /// <summary>Listen to Spotify's audio and auto-correct timing drift (and learn per-song offsets).</summary>
+    public bool AudioSyncEnabled { get; set; } = true;
     /// <summary>Live correction (ms) computed from the audio; added to the playback position. Not serialized.</summary>
     [JsonIgnore] public int AudioCorrectionMs { get; set; }
 

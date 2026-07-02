@@ -39,6 +39,9 @@ public sealed class AudioSync
         for (int i = 0; i < FftSize; i++) _hann[i] = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / (FftSize - 1));
     }
 
+    /// <summary>Drop accumulated gaps (used after the live correction is folded into the song's base offset).</summary>
+    public void ClearGaps() => _gaps.Clear();
+
     public void Reset()
     {
         _bufFill = 0;
