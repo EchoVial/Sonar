@@ -23,6 +23,8 @@ public partial class SettingsWindow : Window
     private readonly App _app;
     private AppConfig C => _app.Config;
     private bool _loading;
+    private bool _offsetDragging;  // user is dragging the Offset slider → don't auto-move it
+    private bool _syncingOffset;   // we're setting the slider from the audio → don't treat as a manual change
 
     private readonly PreviewPlayer _preview;
     private readonly List<Button> _animBtns = new();
@@ -52,7 +54,7 @@ public partial class SettingsWindow : Window
         _preview.Apply(C, _app.CurrentAlbumColor);
         _preview.Start();
 
-        _playPoll.Tick += (_, _) => { UpdatePlayGlyph(); UpdateAudioStatus(); };
+        _playPoll.Tick += (_, _) => { UpdatePlayGlyph(); UpdateAudioStatus(); UpdateOffsetDisplay(); };
         _playPoll.Start();
         Closed += (_, _) => { _preview.Stop(); _playPoll.Stop(); };
     }
@@ -306,7 +308,9 @@ public partial class SettingsWindow : Window
         SizeSlider.ValueChanged += (_, _) => { if (_loading) return; C.FontSize = Math.Round(SizeSlider.Value); SizeVal.Text = ((int)C.FontSize).ToString(); ApplyAll(); };
         GlowSlider.ValueChanged += (_, _) => { if (_loading) return; C.GlowBlurRadius = Math.Round(GlowSlider.Value); GlowVal.Text = ((int)C.GlowBlurRadius).ToString(); ApplyAll(); };
         OpacitySlider.ValueChanged += (_, _) => { if (_loading) return; C.TextOpacity = Math.Round(OpacitySlider.Value) / 100.0; OpacityVal.Text = $"{(int)Math.Round(OpacitySlider.Value)}%"; ApplyAll(); };
-        OffsetSlider.ValueChanged += (_, _) => { if (_loading) return; int ms = (int)Math.Round(OffsetSlider.Value); _app.SetSongOffset(ms); OffsetVal.Text = $"{ms} ms"; UpdatePreview(); };
+        OffsetSlider.ValueChanged += (_, _) => { if (_loading || _syncingOffset) return; int ms = (int)Math.Round(OffsetSlider.Value); _app.SetSongOffset(ms); OffsetVal.Text = $"{ms} ms"; UpdatePreview(); };
+        OffsetSlider.AddHandler(PreviewMouseLeftButtonDownEvent, new System.Windows.Input.MouseButtonEventHandler((_, _) => _offsetDragging = true), true);
+        OffsetSlider.AddHandler(PreviewMouseLeftButtonUpEvent, new System.Windows.Input.MouseButtonEventHandler((_, _) => _offsetDragging = false), true);
 
         PrevBtn.Click += (_, _) => _app.MediaPrevious();
         PlayBtn.Click += (_, _) => { _app.MediaPlayPause(); Dispatcher.BeginInvoke(new Action(UpdatePlayGlyph), DispatcherPriority.Background); };
@@ -373,6 +377,27 @@ public partial class SettingsWindow : Window
     {
         string s = _app.AudioSyncStatus;
         AudioStatus.Text = string.IsNullOrEmpty(s) ? string.Empty : "Audio sync — " + s;
+    }
+
+    /// <summary>When audio sync is on, show the live auto-tuned offset on the slider (unless the user
+    /// is dragging it to override).</summary>
+    private void UpdateOffsetDisplay()
+    {
+        if (C.AudioSyncEnabled)
+        {
+            OffsetHint.Text = "⟳ auto-tuned from Spotify's audio · drag to override";
+            OffsetHint.Foreground = (Brush)Resources["Mint"];
+            if (_offsetDragging) return;
+            _syncingOffset = true;
+            OffsetSlider.Value = Math.Clamp(_app.LiveSongOffset, OffsetSlider.Minimum, OffsetSlider.Maximum);
+            OffsetVal.Text = $"{_app.LiveSongOffset} ms";
+            _syncingOffset = false;
+        }
+        else
+        {
+            OffsetHint.Text = string.IsNullOrEmpty(_app.CurrentTrackKey) ? "global offset · + sooner / − later" : "nudges this song · + sooner / − later";
+            OffsetHint.Foreground = (Brush)Resources["Muted"];
+        }
     }
 
     private void UpdatePlayGlyph() => PlayBtn.Content = _app.IsPlaying ? "⏸" : "▶";

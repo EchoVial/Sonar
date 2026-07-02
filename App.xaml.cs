@@ -537,6 +537,8 @@ public partial class App : Application
     }
     public string? CurrentTrackKey { get; private set; }
     public int EffectiveSongOffset => !string.IsNullOrEmpty(CurrentTrackKey) ? _config.CurrentSongOffset : _config.SyncOffsetMs;
+    /// <summary>The offset actually applied right now = per-song base + live audio correction.</summary>
+    public int LiveSongOffset => EffectiveSongOffset + _config.AudioCorrectionMs;
 
     /// <summary>The Offset control nudges the current song (remembered per track); if nothing is playing, the global offset.</summary>
     public void SetSongOffset(int ms)
@@ -547,6 +549,10 @@ public partial class App : Application
             _config.CurrentSongOffset = ms;
         }
         else _config.SyncOffsetMs = ms;
+        // A manual value is exact — clear the live audio correction; audio sync refines from here.
+        _config.AudioCorrectionMs = 0;
+        _audioSync?.ClearGaps();
+        _lastLearnCorr = 0; _corrStableSince = DateTime.UtcNow;
         _config.Save();
         _scheduler?.Tick();
     }
